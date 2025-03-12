@@ -1,7 +1,7 @@
 // src/controllers/otpController.ts
 import { Request, Response } from 'express';
 import { client } from '../config/twilioConfig';
-
+import supabase from "../config/supabaseConfig";
 export const sendOtp = async (req: Request, res: Response) => {
     try {
         const { phone } = req.body;
@@ -10,20 +10,18 @@ export const sendOtp = async (req: Request, res: Response) => {
             return;
         }
 
-        // Assuming you have a function to send OTP using Twilio
-        const otpResponse = await client.verify.services(process.env.TWILIO_SERVICE_SID as string)
-            .verifications
-            .create({ to: phone, channel: 'sms' });
+        const { data, error } = await supabase.auth.signInWithOtp({ phone });
 
-        if (otpResponse.status !== 'pending') {
-            res.status(500).json({ error: "Failed to send OTP" });
+        if (error) {
+            res.status(500).json({ error: error.message });
             return;
         }
 
         res.json({ success: true, message: "OTP sent to phone" });
     } catch (error) {
         res.status(500).json({ error: "Internal Server Error" });
-    }};
+    }
+};
 
 export const verifyOtp = async (req: Request, res: Response) => {
     const { phone, token }: { phone: string; token: string } = req.body;
@@ -33,21 +31,19 @@ export const verifyOtp = async (req: Request, res: Response) => {
         return;
     }
 
-    try {
-        const verificationCheck = await client.verify.services(process.env.TWILIO_SERVICE_SID as string)
-            .verificationChecks
-            .create({ to: phone, code: token });
+    const { data, error } = await supabase.auth.verifyOtp({ phone, token, type: 'sms' });
 
-        if (verificationCheck.status !== 'approved') {
-            res.status(400).json({ error: 'Verification failed' });
-            return;
-        }
-
-        res.json({
-            success: true,
-            message: 'OTP verified successfully',
-        });
-    } catch (error) {
-        res.status(500).json({ error: "Internal Server Error" });
+    if (error || !data.user || !data.session) {
+        res.status(400).json({ error: error?.message || 'Verification failed' });
+        return;
     }
+
+    res.json({
+        success: true,
+        userId: data.user.id,
+        access_token: data.session.access_token,
+        token_type: 'Bearer',
+        expires_in: data.session.expires_in || 3600,
+        message: 'OTP verified successfully',
+    });
 };
